@@ -2,50 +2,78 @@
 #include <filesystem>
 #include <string>
 #include <system_error>
+#include <unordered_map>
+#include <vector>
 
-// A common modern C++ practice to avoid typing std::filesystem over and over
 namespace fs = std::filesystem;
 
-void scanDirectory(const std::string& rootPath) {
-    std::cout << "Scanning directory: " << rootPath << "...\n";
+using FileIndex = std::unordered_map<std::string, std::vector<std::string>>;
 
-    // C++17 flag to gracefully skip folders we don't have OS permissions to read
+void scanDirectory(const std::string& rootPath, FileIndex& index) {
+    std::cout << "Scanning directory and building index...\n";
     auto options = fs::directory_options::skip_permission_denied;
 
     try {
-        // fs::recursive_directory_iterator walks the tree for us.
-        // We use `const auto& entry` to pass by reference.
         for (const auto& entry : fs::recursive_directory_iterator(rootPath, options)) {
-            
-            // std::error_code is used for the non-throwing overloads of filesystem checks
             std::error_code ec; 
-
-            // We only want to index actual files, skipping directories and symlinks
             if (entry.is_regular_file(ec)) {
-                // In Step 2, we will insert these into our Hash Map. 
-                // For now, we just print them to verify the traversal works.
-                std::cout << "File: " << entry.path().filename().string() << "\n";
-                // std::cout << "Path: " << entry.path().string() << "\n";
-            }
-
-            // If a specific file check failed, we log it but keep the loop running
-            if (ec) {
-                std::cerr << "[Warning] Could not read file info: " << ec.message() << "\n";
+                std::string filename = entry.path().filename().string();
+                std::string fullPath = fs::absolute(entry.path()).string();
+                index[filename].push_back(fullPath);
             }
         }
     } catch (const fs::filesystem_error& e) {
-        // Catches fatal filesystem errors that the iterator couldn't bypass
         std::cerr << "[Fatal Error] Directory traversal failed: " << e.what() << "\n";
     }
 }
 
+// Step 3: Interactive Search Loop
+void searchLoop(const FileIndex& index) {
+    std::string query;
+    std::cout << "\n--- Local File Search Engine ---\n";
+    std::cout << "Type a filename (with extension) to find its paths.\n";
+    std::cout << "Type '!quit' to exit.\n\n";
+
+    while (true) {
+        std::cout << "Search> ";
+        std::getline(std::cin, query); // Using getline to handle spaces in filenames
+
+        if (query == "!quit") {
+            break;
+        }
+
+        if (query.empty()) {
+            continue;
+        }
+
+        // Use .find() to look up the key without accidentally modifying the map
+        auto it = index.find(query);
+
+        if (it != index.end()) {
+            // it->second gives us access to the vector of paths
+            const auto& paths = it->second;
+            std::cout << "Found " << paths.size() << " result(s):\n";
+            
+            for (const auto& path : paths) {
+                std::cout << "  -> " << path << "\n";
+            }
+        } else {
+            std::cout << "File not found.\n";
+        }
+        std::cout << "\n";
+    }
+}
+
 int main() {
-    // For testing, "." means the directory where the executable is located.
-    // Try changing this to a specific Windows path like "C:\\Users\\Public" to test it.
     std::string pathToScan = "."; 
+    FileIndex myIndex;
     
-    scanDirectory(pathToScan);
-    
-    std::cout << "\nScanning complete.\n";
+    scanDirectory(pathToScan, myIndex);
+    std::cout << "Total unique filenames indexed: " << myIndex.size() << "\n";
+
+    // Launch the interactive loop
+    searchLoop(myIndex);
+
+    std::cout << "Exiting Search Engine. Goodbye!\n";
     return 0;
 }
